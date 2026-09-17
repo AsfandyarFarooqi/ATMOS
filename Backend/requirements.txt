@@ -1,0 +1,18 @@
+# ATMOS - runtime dependencies
+
+# Web
+Flask>=3.1.1
+python-dotenv>=1.1.0
+
+# Earth Engine
+earthengine-api>=1.6
+
+# Data / ML
+pandas>=2.3.0
+numpy>=2.1.0
+scipy>=1.14.0
+scikit-learn>=1.5.0
+xgboost>=2.1.0
+
+# Production server
+waitress>=3.0.0

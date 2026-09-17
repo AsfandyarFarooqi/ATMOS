@@ -1,0 +1,18 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local settings and secrets (.env.example is committed, .env is not)
+.env
+.env.local
+
+# Editor / tooling state
+.claude/settings.local.json
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

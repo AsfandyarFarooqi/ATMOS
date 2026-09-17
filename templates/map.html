@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0d1014"/>
+  <title>ATMOS — Earth &amp; Carbon Intelligence</title>
+
+  <!-- Vendored locally: the CDN copies were failing behind QUIC, and local
+       assets also mean the app works with no internet beyond the map tiles. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet-draw/leaflet.draw.css') }}"/>
+
+  <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='map.css') }}">
+
+  <!-- Inline favicon: stops the /favicon.ico 404 without another request. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%233987e5'/%3E%3Ccircle cx='12' cy='12' r='4' fill='%237cc0ff'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <h1>ATMOS</h1>
+    </div>
+    <div class="subtitle">Earth &amp; Carbon Intelligence</div>
+    <div class="header-status" id="app-status" data-state="idle" role="status" aria-live="polite">
+      <span class="dot"></span><span id="app-status-text">Awaiting region</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <!-- ---------- Map ---------- -->
+    <section class="panel panel--map">
+      <div class="panel__head">
+        <span class="panel__title">Region of Interest</span>
+        <span class="panel__hint">Draw a region, then press Submit</span>
+      </div>
+
+      <div id="map"></div>
+
+      <div class="toolbar">
+        <div class="control">
+          <label for="startDate">Start</label>
+          <input type="date" id="startDate" />
+        </div>
+        <div class="control">
+          <label for="endDate">End</label>
+          <input type="date" id="endDate" />
+        </div>
+        <div class="status-pill" id="roi-status" data-active="false">No region selected</div>
+        <div class="presets">
+          <button class="preset" type="button" data-months="3">Last 3 mo</button>
+          <button class="preset" type="button" data-months="6">Last 6 mo</button>
+          <button class="preset" type="button" data-months="12">Last 12 mo</button>
+        </div>
+        <!-- Queries only run from here; drawing a region never triggers one. -->
+        <button class="btn btn--primary btn--submit" id="run-btn" type="button" disabled>Submit</button>
+      </div>
+    </section>
+
+    <!-- ---------- Dashboard ---------- -->
+    <aside class="dashboard" id="dashboard" data-loading="false">
+      <div class="progress" aria-hidden="true"></div>
+
+      <!-- Hero numbers: the headline values are stat tiles, not charts -->
+      <div class="stats" id="stats">
+        <div class="stat" style="--chip: var(--series-blue)">
+          <div class="stat__label">Mean monthly balance</div>
+          <div class="stat__value" id="stat-balance">—</div>
+          <div class="stat__meta" id="stat-balance-meta">Awaiting analysis</div>
+        </div>
+        <div class="stat" style="--chip: var(--series-orange)">
+          <div class="stat__label">Mean temperature</div>
+          <div class="stat__value" id="stat-temp">—</div>
+          <div class="stat__meta" id="stat-temp-meta">Awaiting analysis</div>
+        </div>
+        <div class="stat" style="--chip: var(--series-blue)">
+          <div class="stat__label">Total precipitation</div>
+          <div class="stat__value" id="stat-precep">—</div>
+          <div class="stat__meta" id="stat-precep-meta">Awaiting analysis</div>
+        </div>
+        <div class="stat" style="--chip: var(--series-aqua)">
+          <div class="stat__label">Mean aerosol index</div>
+          <div class="stat__value" id="stat-uvai">—</div>
+          <div class="stat__meta" id="stat-uvai-meta">Awaiting analysis</div>
+        </div>
+      </div>
+
+      <!-- Empty state, replaced by charts once data arrives -->
+      <div class="empty" id="empty-state">
+        <strong>No analysis yet</strong>
+        <span>Draw a region, choose a date range and press Submit. Once the data arrives, ATMOS runs five machine-learning analyses on it:</span>
+        <ul class="empty__list">
+          <li><b>Forecast</b>Gaussian-process projection of the next 3 months, with a 95% interval</li>
+          <li><b>Anomalies</b>Isolation Forest flags unusual months and names the cause</li>
+          <li><b>Drivers</b>Ridge regression finds which climate factor moves carbon uptake</li>
+          <li><b>Regimes</b>k-means groups months into distinct climate regimes</li>
+          <li><b>Trends</b>Robust Theil–Sen slopes with significance tests</li>
+        </ul>
+      </div>
+
+      <div id="charts" class="stack" hidden>
+        <!-- ---------- ML insights ---------- -->
+        <section class="stack" id="insights" aria-labelledby="insights-title">
+          <div class="card card--insights">
+            <div class="card__head">
+              <span class="card__title" id="insights-title">ML insights</span>
+              <span class="badge" id="insights-meta" data-state="busy">Analysing…</span>
+            </div>
+            <ol class="findings" id="findings"></ol>
+            <p class="card__note" id="insights-skipped" hidden></p>
+          </div>
+
+          <div class="card">
+            <div class="card__head">
+              <span class="card__title">Forecast</span>
+              <div class="segmented" id="forecast-toggle" role="tablist" aria-label="Forecast metric">
+                <button type="button" role="tab" data-metric="GPP_CO2_kg" aria-selected="true">GPP</button>
+                <button type="button" role="tab" data-metric="Temperature_C" aria-selected="false">Temp</button>
+                <button type="button" role="tab" data-metric="Precipitation_mm" aria-selected="false">Rain</button>
+              </div>
+            </div>
+            <div class="legend">
+              <span class="legend__item"><span class="legend__line"></span>Observed</span>
+              <span class="legend__item"><span class="legend__line legend__line--dashed"></span>Forecast</span>
+              <span class="legend__item"><span class="legend__band"></span>95% interval</span>
+            </div>
+            <div class="chart"><canvas id="forecast-chart"></canvas></div>
+            <p class="card__note" id="forecast-note"></p>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card__head">
+                <span class="card__title">What drives GPP uptake</span>
+                <span class="card__sub">Ridge regression · effect in SD</span>
+              </div>
+              <div class="legend">
+                <span class="legend__item"><span class="legend__swatch" style="background: var(--series-blue)"></span>Raises uptake</span>
+                <span class="legend__item"><span class="legend__swatch" style="background: var(--series-red)"></span>Lowers uptake</span>
+              </div>
+              <div class="chart chart--short"><canvas id="drivers-chart"></canvas></div>
+              <p class="card__note" id="drivers-note"></p>
+            </div>
+            <div class="card">
+              <div class="card__head">
+                <span class="card__title">Climate regimes</span>
+                <span class="card__sub">k-means · temperature × rain</span>
+              </div>
+              <div class="legend" id="regimes-legend"></div>
+              <div class="chart"><canvas id="regimes-chart"></canvas></div>
+              <p class="card__note" id="regimes-note"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Headline chart: diverging, so it gets a legend -->
+        <div class="card">
+          <div class="card__head">
+            <span class="card__title">Net carbon balance</span>
+            <span class="card__sub">AGB CO₂ stock + GPP CO₂ uptake · kg, region total</span>
+          </div>
+          <div class="legend">
+            <span class="legend__item">
+              <span class="legend__swatch" style="background: var(--series-blue)"></span>Net sink (absorbing)
+            </span>
+            <span class="legend__item">
+              <span class="legend__swatch" style="background: var(--series-red)"></span>Net source (emitting)
+            </span>
+          </div>
+          <div class="chart chart--tall"><canvas id="cBalance-chart"></canvas></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card__head">
+              <span class="card__title">Above-ground biomass CO₂</span>
+              <span class="card__sub">kg CO₂ stock, region total</span>
+            </div>
+            <div class="chart"><canvas id="agb-chart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card__head">
+              <span class="card__title">Gross primary production CO₂</span>
+              <span class="card__sub">kg CO₂ taken up, region total</span>
+            </div>
+            <div class="chart"><canvas id="gpp-chart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card__head">
+              <span class="card__title">Air temperature</span>
+              <span class="card__sub">°C at 2 m, region mean</span>
+            </div>
+            <div class="chart"><canvas id="temp-chart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card__head">
+              <span class="card__title">Precipitation</span>
+              <span class="card__sub">mm per month, region mean</span>
+            </div>
+            <div class="chart"><canvas id="precep-chart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__head">
+            <span class="card__title">Absorbing aerosol index</span>
+            <span class="card__sub">Dimensionless — higher means more absorbing aerosol</span>
+          </div>
+          <div class="chart"><canvas id="uvai-chart"></canvas></div>
+        </div>
+
+        <!-- Table view: every plotted value is readable here too -->
+        <div class="card">
+          <div class="card__head">
+            <span class="card__title">Monthly summary</span>
+            <span class="card__sub">All values, exact</span>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <caption class="visually-hidden">Monthly carbon, climate and aerosol values for the selected region</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Month</th>
+                  <th scope="col">AGB CO₂ (kg)</th>
+                  <th scope="col">GPP CO₂ (kg)</th>
+                  <th scope="col">Aerosol idx</th>
+                  <th scope="col">Balance (kg)</th>
+                  <th scope="col">Temp (°C)</th>
+                  <th scope="col">Precip (mm)</th>
+                </tr>
+              </thead>
+              <tbody id="monthly-summary-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" data-show="false" role="alert"></div>
+
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/leaflet-draw/leaflet.draw.js') }}"></script>
+  <script src="{{ url_for('static', filename='charts.js') }}"></script>
+  <script src="{{ url_for('static', filename='map.js') }}"></script>
+</body>
+</html>
