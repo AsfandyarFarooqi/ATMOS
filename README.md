@@ -124,3 +124,5 @@ results of each analysis, and `skipped` with the reason any analysis
 could not run.
 
 `GET /health` -> `{"status": "ok"}`
+
+![ATMOS dashboard](ATMOS_Main.png)
