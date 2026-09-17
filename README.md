@@ -1,5 +1,7 @@
 # ATMOS - Earth & Carbon Intelligence
 
+![ATMOS dashboard](ATMOS_Main.png)
+
 Flask + Google Earth Engine dashboard that computes a monthly carbon balance,
 temperature, precipitation and aerosol index for a drawn region of interest.
 
@@ -125,4 +127,3 @@ could not run.
 
 `GET /health` -> `{"status": "ok"}`
 
-![ATMOS dashboard](ATMOS_Main.png)
